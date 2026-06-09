@@ -1,8 +1,13 @@
 const STORAGE_KEY = "parkerTrainingLogEntries";
+const SUPABASE_URL = "https://xbqhtcqvbcndikuqsesz.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhicWh0Y3F2YmNuZGlrdXFzZXN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2NzExOTEsImV4cCI6MjA5NjI0NzE5MX0.nmXeAvGQMfsamFDapBzO0JJiMXCqov7LNEyuUlnSJA8";
+const SUPABASE_TABLE = "training_log_entries";
+const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const state = {
   entries: loadEntries(),
-  activeTab: "today"
+  activeTab: "today",
+  syncReady: false
 };
 
 const fields = {
@@ -50,6 +55,75 @@ function loadEntries() {
 
 function persistEntries() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
+}
+
+function toRemoteEntry(entry) {
+  return {
+    date: entry.date,
+    sleep_hours: entry.sleepHours || 0,
+    bedtime: entry.bedtime || null,
+    wake_time: entry.wakeTime || null,
+    sleep_quality: entry.sleepQuality || 3,
+    energy: entry.energy || 3,
+    mood: entry.mood || 3,
+    soreness: entry.soreness || 2,
+    workout_type: entry.workoutType || "Rest",
+    duration: entry.duration || 0,
+    effort: entry.effort || 4,
+    workout_notes: entry.workoutNotes || "",
+    daily_win: entry.dailyWin || "",
+    updated_at: entry.updatedAt || new Date().toISOString()
+  };
+}
+
+function fromRemoteEntry(row) {
+  return {
+    date: row.date,
+    sleepHours: Number(row.sleep_hours || 0),
+    bedtime: row.bedtime ? row.bedtime.slice(0, 5) : "",
+    wakeTime: row.wake_time ? row.wake_time.slice(0, 5) : "",
+    sleepQuality: Number(row.sleep_quality || 3),
+    energy: Number(row.energy || 3),
+    mood: Number(row.mood || 3),
+    soreness: Number(row.soreness || 2),
+    workoutType: row.workout_type || "Rest",
+    duration: Number(row.duration || 0),
+    effort: Number(row.effort || 4),
+    workoutNotes: row.workout_notes || "",
+    dailyWin: row.daily_win || "",
+    updatedAt: row.updated_at || row.created_at || new Date().toISOString()
+  };
+}
+
+function mergeEntries(localEntries, remoteEntries) {
+  const byDate = new Map();
+  [...localEntries, ...remoteEntries].forEach((entry) => {
+    const existing = byDate.get(entry.date);
+    if (!existing || new Date(entry.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
+      byDate.set(entry.date, entry);
+    }
+  });
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function syncFromSupabase() {
+  if (!db) return;
+  try {
+    if (state.entries.length) {
+      const { error: upsertError } = await db.from(SUPABASE_TABLE).upsert(state.entries.map(toRemoteEntry), { onConflict: "date" });
+      if (upsertError) throw upsertError;
+    }
+    const { data, error } = await db.from(SUPABASE_TABLE).select("*").order("date", { ascending: true });
+    if (error) throw error;
+    state.entries = mergeEntries(state.entries, (data || []).map(fromRemoteEntry));
+    state.syncReady = true;
+    persistEntries();
+    showToast("Synced with Supabase");
+  } catch (error) {
+    console.error(error);
+    state.syncReady = false;
+    showToast("Using local save until Supabase table is ready");
+  }
 }
 
 function todayString() {
@@ -228,7 +302,7 @@ function blankEntry(date = todayString()) {
   };
 }
 
-function saveEntry(entry) {
+async function saveEntry(entry) {
   const existingIndex = state.entries.findIndex((item) => item.date === entry.date);
   if (existingIndex >= 0) {
     state.entries[existingIndex] = entry;
@@ -236,6 +310,33 @@ function saveEntry(entry) {
     state.entries.push(entry);
   }
   persistEntries();
+
+  if (!db) return;
+  try {
+    const { error } = await db.from(SUPABASE_TABLE).upsert(toRemoteEntry(entry), { onConflict: "date" });
+    if (error) throw error;
+    state.syncReady = true;
+  } catch (error) {
+    console.error(error);
+    state.syncReady = false;
+    showToast("Saved locally; Supabase sync failed");
+  }
+}
+
+async function deleteEntry(date) {
+  state.entries = state.entries.filter((entry) => entry.date !== date);
+  persistEntries();
+
+  if (!db) return;
+  try {
+    const { error } = await db.from(SUPABASE_TABLE).delete().eq("date", date);
+    if (error) throw error;
+    state.syncReady = true;
+  } catch (error) {
+    console.error(error);
+    state.syncReady = false;
+    showToast("Deleted locally; Supabase sync failed");
+  }
 }
 
 function updateReadiness() {
@@ -440,27 +541,26 @@ function renderAll() {
   renderInsights();
 }
 
-entryForm.addEventListener("submit", (event) => {
+entryForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   updateSleepSummary();
   const entry = readForm();
   if (!entry.date) return;
-  saveEntry(entry);
-  showToast("Entry saved");
+  await saveEntry(entry);
+  showToast(state.syncReady ? "Entry saved to Supabase" : "Entry saved locally");
   renderAll();
 });
 
-deleteEntryButton.addEventListener("click", () => {
+deleteEntryButton.addEventListener("click", async () => {
   const date = fields.date.value;
   const existing = entryByDate(date);
   if (!existing) {
     showToast("No saved entry for this date");
     return;
   }
-  state.entries = state.entries.filter((entry) => entry.date !== date);
-  persistEntries();
+  await deleteEntry(date);
   writeForm(blankEntry(date));
-  showToast("Entry deleted");
+  showToast(state.syncReady ? "Entry deleted from Supabase" : "Entry deleted locally");
   renderAll();
 });
 
@@ -520,5 +620,12 @@ document.querySelectorAll(".tab-button").forEach((button) => {
   button.addEventListener("click", () => switchTab(button.dataset.tab));
 });
 
-writeForm(entryByDate(todayString()) || blankEntry(todayString()));
-renderAll();
+async function init() {
+  writeForm(entryByDate(todayString()) || blankEntry(todayString()));
+  renderAll();
+  await syncFromSupabase();
+  writeForm(entryByDate(fields.date.value) || blankEntry(fields.date.value));
+  renderAll();
+}
+
+init();
