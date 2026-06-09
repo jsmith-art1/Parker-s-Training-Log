@@ -1,631 +1,426 @@
-const STORAGE_KEY = "parkerTrainingLogEntries";
-const SUPABASE_URL = "https://xbqhtcqvbcndikuqsesz.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhicWh0Y3F2YmNuZGlrdXFzZXN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2NzExOTEsImV4cCI6MjA5NjI0NzE5MX0.nmXeAvGQMfsamFDapBzO0JJiMXCqov7LNEyuUlnSJA8";
-const SUPABASE_TABLE = "training_log_entries";
-const db = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+/* ─────────────────────────────────────────────
+   Smith Family Training Log — app.js v4.1
+   Multi-user: Parker · Justin · Shelby
+───────────────────────────────────────────── */
 
-const state = {
-  entries: loadEntries(),
-  activeTab: "today",
-  syncReady: false
+// ── User config ───────────────────────────────
+const USERS = {
+  parker: { label: 'Parker', emoji: '🏃', sleepTarget: [8, 10] },
+  justin: { label: 'Justin', emoji: '💪', sleepTarget: [7, 9]  },
+  shelby: { label: 'Shelby', emoji: '⚡', sleepTarget: [7, 9]  },
 };
 
-const fields = {
-  date: document.querySelector("#entryDate"),
-  bedtime: document.querySelector("#bedtime"),
-  wakeTime: document.querySelector("#wakeTime"),
-  sleepHours: document.querySelector("#sleepHours"),
-  sleepQuality: document.querySelector("#sleepQuality"),
-  energy: document.querySelector("#energy"),
-  mood: document.querySelector("#mood"),
-  soreness: document.querySelector("#soreness"),
-  workoutType: document.querySelector("#workoutType"),
-  duration: document.querySelector("#duration"),
-  effort: document.querySelector("#effort"),
-  workoutNotes: document.querySelector("#workoutNotes"),
-  dailyWin: document.querySelector("#dailyWin")
-};
+let currentUser = localStorage.getItem('activeUser') || 'parker';
 
-const entryForm = document.querySelector("#entryForm");
-const deleteEntryButton = document.querySelector("#deleteEntryButton");
-const newEntryButton = document.querySelector("#newEntryButton");
-const usualSleepButton = document.querySelector("#usualSleepButton");
-const historyList = document.querySelector("#historyList");
-const statsGrid = document.querySelector("#statsGrid");
-const insightList = document.querySelector("#insightList");
-const readinessScore = document.querySelector("#readinessScore");
-const trendChart = document.querySelector("#trendChart");
-const toast = document.querySelector("#toast");
-
-const scaleLabels = {
-  1: "Low",
-  2: "Light",
-  3: "Okay",
-  4: "Good",
-  5: "Great"
-};
-
+// ── Storage helpers ───────────────────────────
+function storageKey(suffix) {
+  return `trainingLog_${currentUser}_${suffix}`;
+}
 function loadEntries() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(storageKey('entries'))) || {}; }
+  catch { return {}; }
+}
+function saveEntries(entries) {
+  localStorage.setItem(storageKey('entries'), JSON.stringify(entries));
 }
 
-function persistEntries() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
-}
-
-function toRemoteEntry(entry) {
-  return {
-    date: entry.date,
-    sleep_hours: entry.sleepHours || 0,
-    bedtime: entry.bedtime || null,
-    wake_time: entry.wakeTime || null,
-    sleep_quality: entry.sleepQuality || 3,
-    energy: entry.energy || 3,
-    mood: entry.mood || 3,
-    soreness: entry.soreness || 2,
-    workout_type: entry.workoutType || "Rest",
-    duration: entry.duration || 0,
-    effort: entry.effort || 4,
-    workout_notes: entry.workoutNotes || "",
-    daily_win: entry.dailyWin || "",
-    updated_at: entry.updatedAt || new Date().toISOString()
-  };
-}
-
-function fromRemoteEntry(row) {
-  return {
-    date: row.date,
-    sleepHours: Number(row.sleep_hours || 0),
-    bedtime: row.bedtime ? row.bedtime.slice(0, 5) : "",
-    wakeTime: row.wake_time ? row.wake_time.slice(0, 5) : "",
-    sleepQuality: Number(row.sleep_quality || 3),
-    energy: Number(row.energy || 3),
-    mood: Number(row.mood || 3),
-    soreness: Number(row.soreness || 2),
-    workoutType: row.workout_type || "Rest",
-    duration: Number(row.duration || 0),
-    effort: Number(row.effort || 4),
-    workoutNotes: row.workout_notes || "",
-    dailyWin: row.daily_win || "",
-    updatedAt: row.updated_at || row.created_at || new Date().toISOString()
-  };
-}
-
-function mergeEntries(localEntries, remoteEntries) {
-  const byDate = new Map();
-  [...localEntries, ...remoteEntries].forEach((entry) => {
-    const existing = byDate.get(entry.date);
-    if (!existing || new Date(entry.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
-      byDate.set(entry.date, entry);
-    }
-  });
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-async function syncFromSupabase() {
-  if (!db) return;
-  try {
-    if (state.entries.length) {
-      const { error: upsertError } = await db.from(SUPABASE_TABLE).upsert(state.entries.map(toRemoteEntry), { onConflict: "date" });
-      if (upsertError) throw upsertError;
-    }
-    const { data, error } = await db.from(SUPABASE_TABLE).select("*").order("date", { ascending: true });
-    if (error) throw error;
-    state.entries = mergeEntries(state.entries, (data || []).map(fromRemoteEntry));
-    state.syncReady = true;
-    persistEntries();
-    showToast("Synced with Supabase");
-  } catch (error) {
-    console.error(error);
-    state.syncReady = false;
-    showToast("Using local save until Supabase table is ready");
-  }
-}
-
-function todayString() {
+// ── Utility helpers ───────────────────────────
+function today() {
   return new Date().toISOString().slice(0, 10);
 }
+function calcSleep(bedtime, wakeTime) {
+  if (!bedtime || !wakeTime) return null;
+  const [bh, bm] = bedtime.split(':').map(Number);
+  const [wh, wm] = wakeTime.split(':').map(Number);
+  let mins = (wh * 60 + wm) - (bh * 60 + bm);
+  if (mins <= 0) mins += 24 * 60;
+  return +(mins / 60).toFixed(1);
+}
+function sleepHint(hours) {
+  const [lo, hi] = USERS[currentUser].sleepTarget;
+  if (hours === null) return '';
+  if (hours < lo) return `${lo - hours}h short of target.`;
+  if (hours > hi) return `${hours - hi}h over the top — still good!`;
+  return 'Right in the target zone.';
+}
+function calcReadiness(entry) {
+  const { sleepHours, sleepQuality, energy, mood, soreness } = entry;
+  if (!sleepHours) return null;
+  const sleepScore = Math.min(sleepHours / 9, 1) * 5;
+  const raw = (sleepScore + +sleepQuality + +energy + +mood + (6 - +soreness)) / 5;
+  return Math.round(raw * 10) / 10;
+}
+function formatDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+let toastTimer;
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 2500);
+}
 
-function formatDate(value) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric"
+// ── Ratings ───────────────────────────────────
+function setRating(name, val) {
+  document.getElementById(name).value = val;
+  document.getElementById(name + 'Value').textContent = val;
+  document.querySelector(`[data-rating="${name}"] .star-row`)
+    .querySelectorAll('button').forEach(b => {
+      b.classList.toggle('active', +b.dataset.value <= val);
+      b.setAttribute('aria-checked', +b.dataset.value === val ? 'true' : 'false');
+    });
+}
+function setEffort(val) {
+  document.getElementById('effort').value = val;
+  document.getElementById('effortValue').textContent = val;
+  document.querySelectorAll('.effort-row button').forEach(b => {
+    b.classList.toggle('active', +b.dataset.value <= val);
+    b.setAttribute('aria-checked', +b.dataset.value === val ? 'true' : 'false');
   });
 }
 
-function numberValue(value, fallback = 0) {
-  const next = Number(value);
-  return Number.isFinite(next) ? next : fallback;
-}
-
-function rounded(value, digits = 1) {
-  if (!Number.isFinite(value)) return "--";
-  return value.toFixed(digits).replace(/\.0$/, "");
-}
-
-function minutesFromTime(value) {
-  if (!value) return null;
-  const [hours, minutes] = value.split(":").map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  return hours * 60 + minutes;
-}
-
-function sleepHoursFromTimes(bedtime, wakeTime) {
-  const bed = minutesFromTime(bedtime);
-  const wake = minutesFromTime(wakeTime);
-  if (bed == null || wake == null) return 0;
-  const minutes = wake >= bed ? wake - bed : wake + 1440 - bed;
-  return Math.round((minutes / 60) * 100) / 100;
-}
-
-function formatSleepHours(hours) {
-  if (!hours) return "--";
-  const totalMinutes = Math.round(hours * 60);
-  const wholeHours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes ? `${wholeHours}h ${minutes}m` : `${wholeHours}h`;
-}
-
-function sortedEntries() {
-  return [...state.entries].sort((a, b) => b.date.localeCompare(a.date));
-}
-
-function entryByDate(date) {
-  return state.entries.find((entry) => entry.date === date);
-}
-
-function readiness(entry) {
-  if (!entry) return null;
-  const sleepScore = Math.min(5, Math.max(1, (entry.sleepHours || 0) / 2));
-  const sorenessPenalty = 6 - entry.soreness;
-  return Math.round(((sleepScore + entry.sleepQuality + entry.energy + entry.mood + sorenessPenalty) / 25) * 100);
-}
-
-function showToast(message) {
-  toast.textContent = message;
-  toast.classList.add("show");
-  window.setTimeout(() => toast.classList.remove("show"), 1800);
-}
-
-function renderRating(name) {
-  const group = document.querySelector(`[data-rating="${name}"]`);
-  const value = numberValue(fields[name].value);
-  group.querySelectorAll(".star-row button").forEach((button) => {
-    const isActive = numberValue(button.dataset.value) <= value;
-    button.classList.toggle("active", isActive);
-    button.setAttribute("aria-checked", String(numberValue(button.dataset.value) === value));
-  });
-}
-
-function renderEffort() {
-  const value = numberValue(fields.effort.value, 4);
-  document.querySelectorAll(".effort-row button").forEach((button) => {
-    const isSelected = numberValue(button.dataset.value) === value;
-    button.classList.toggle("active", isSelected);
-    button.setAttribute("aria-checked", String(isSelected));
-  });
-}
-
-function updateSleepSummary() {
-  const calculatedHours = sleepHoursFromTimes(fields.bedtime.value, fields.wakeTime.value);
-  const existingHours = numberValue(fields.sleepHours.value);
-  if (calculatedHours) {
-    fields.sleepHours.value = calculatedHours;
-  }
-  const summary = document.querySelector("#sleepSummary");
-  const hint = document.querySelector("#sleepHint");
-  const displayedHours = calculatedHours || existingHours;
-  summary.textContent = displayedHours ? `${formatSleepHours(displayedHours)} sleep` : "Add bedtime and wake-up";
-
-  if (!displayedHours) {
-    hint.textContent = "The app will calculate sleep automatically.";
-  } else if (!calculatedHours) {
-    hint.textContent = "Add times to make tracking easier.";
-  } else if (calculatedHours < 8) {
-    hint.textContent = "A little short for a teen training day.";
-  } else if (calculatedHours <= 10) {
-    hint.textContent = "Right in the teen target zone.";
-  } else {
-    hint.textContent = "Big sleep. Nice recovery deposit.";
-  }
-}
-
-function updateRangeLabels() {
-  document.querySelector("#sleepQualityValue").textContent = fields.sleepQuality.value;
-  document.querySelector("#energyValue").textContent = fields.energy.value;
-  document.querySelector("#moodValue").textContent = fields.mood.value;
-  document.querySelector("#sorenessValue").textContent = fields.soreness.value;
-  document.querySelector("#effortValue").textContent = fields.effort.value;
-  renderRating("sleepQuality");
-  renderRating("energy");
-  renderRating("mood");
-  renderRating("soreness");
-  renderEffort();
-}
-
-function readForm() {
-  return {
-    date: fields.date.value,
-    sleepHours: numberValue(fields.sleepHours.value),
-    bedtime: fields.bedtime.value,
-    wakeTime: fields.wakeTime.value,
-    sleepQuality: numberValue(fields.sleepQuality.value, 3),
-    energy: numberValue(fields.energy.value, 3),
-    mood: numberValue(fields.mood.value, 3),
-    soreness: numberValue(fields.soreness.value, 2),
-    workoutType: fields.workoutType.value,
-    duration: numberValue(fields.duration.value),
-    effort: numberValue(fields.effort.value, 4),
-    workoutNotes: fields.workoutNotes.value.trim(),
-    dailyWin: fields.dailyWin ? fields.dailyWin.value.trim() : "",
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function writeForm(entry) {
-  fields.date.value = entry.date || todayString();
-  fields.bedtime.value = entry.bedtime || "";
-  fields.wakeTime.value = entry.wakeTime || "";
-  fields.sleepHours.value = entry.sleepHours || "";
-  fields.sleepQuality.value = entry.sleepQuality || 3;
-  fields.energy.value = entry.energy || 3;
-  fields.mood.value = entry.mood || 3;
-  fields.soreness.value = entry.soreness || 2;
-  fields.workoutType.value = entry.workoutType || "Rest";
-  fields.duration.value = entry.duration || "";
-  fields.effort.value = entry.effort || 4;
-  fields.workoutNotes.value = entry.workoutNotes || "";
-  fields.dailyWin.value = entry.dailyWin || "";
-  updateSleepSummary();
-  updateRangeLabels();
+// ── Sleep display ─────────────────────────────
+function updateSleepDisplay() {
+  const bedtime  = document.getElementById('bedtime').value;
+  const wakeTime = document.getElementById('wakeTime').value;
+  const hours    = calcSleep(bedtime, wakeTime);
+  document.getElementById('sleepHours').value       = hours !== null ? hours : 8;
+  document.getElementById('sleepSummary').textContent = hours !== null ? `${hours}h sleep` : '-- sleep';
+  document.getElementById('sleepHint').textContent    = sleepHint(hours);
   updateReadiness();
 }
 
-function blankEntry(date = todayString()) {
+// ── Readiness ─────────────────────────────────
+function updateReadiness() {
+  const entry = readFormValues();
+  const score = calcReadiness(entry);
+  document.getElementById('readinessScore').textContent = score !== null ? score.toFixed(1) : '--';
+}
+
+// ── Form ──────────────────────────────────────
+function readFormValues() {
   return {
-    date,
-    bedtime: "22:30",
-    wakeTime: "06:30",
-    sleepHours: 8,
-    sleepQuality: 3,
-    energy: 3,
-    mood: 3,
-    soreness: 2,
-    workoutType: "Rest",
-    effort: 4
+    date:         document.getElementById('entryDate').value,
+    bedtime:      document.getElementById('bedtime').value,
+    wakeTime:     document.getElementById('wakeTime').value,
+    sleepHours:   +document.getElementById('sleepHours').value,
+    sleepQuality: +document.getElementById('sleepQuality').value,
+    energy:       +document.getElementById('energy').value,
+    mood:         +document.getElementById('mood').value,
+    soreness:     +document.getElementById('soreness').value,
+    workoutType:  document.getElementById('workoutType').value,
+    duration:     +document.getElementById('duration').value || 0,
+    effort:       +document.getElementById('effort').value,
+    notes:        document.getElementById('workoutNotes').value.trim(),
   };
 }
-
-async function saveEntry(entry) {
-  const existingIndex = state.entries.findIndex((item) => item.date === entry.date);
-  if (existingIndex >= 0) {
-    state.entries[existingIndex] = entry;
-  } else {
-    state.entries.push(entry);
-  }
-  persistEntries();
-
-  if (!db) return;
-  try {
-    const { error } = await db.from(SUPABASE_TABLE).upsert(toRemoteEntry(entry), { onConflict: "date" });
-    if (error) throw error;
-    state.syncReady = true;
-  } catch (error) {
-    console.error(error);
-    state.syncReady = false;
-    showToast("Saved locally; Supabase sync failed");
-  }
+function populateForm(entry) {
+  document.getElementById('entryDate').value  = entry.date     || today();
+  document.getElementById('bedtime').value    = entry.bedtime  || '';
+  document.getElementById('wakeTime').value   = entry.wakeTime || '';
+  document.getElementById('sleepHours').value = entry.sleepHours || 8;
+  updateSleepDisplay();
+  setRating('sleepQuality', entry.sleepQuality || 3);
+  setRating('energy',       entry.energy       || 3);
+  setRating('mood',         entry.mood         || 3);
+  setRating('soreness',     entry.soreness     || 2);
+  setEffort(entry.effort || 4);
+  document.getElementById('workoutType').value  = entry.workoutType || 'Rest';
+  document.getElementById('duration').value     = entry.duration    || '';
+  document.getElementById('workoutNotes').value = entry.notes       || '';
+  updateReadiness();
+}
+function resetForm() {
+  populateForm({ date: today() });
+}
+function loadTodayEntry() {
+  const entries = loadEntries();
+  const d = today();
+  entries[d] ? populateForm(entries[d]) : resetForm();
 }
 
-async function deleteEntry(date) {
-  state.entries = state.entries.filter((entry) => entry.date !== date);
-  persistEntries();
+// ── Tab switching ─────────────────────────────
+let activeTab = 'today';
 
-  if (!db) return;
-  try {
-    const { error } = await db.from(SUPABASE_TABLE).delete().eq("date", date);
-    if (error) throw error;
-    state.syncReady = true;
-  } catch (error) {
-    console.error(error);
-    state.syncReady = false;
-    showToast("Deleted locally; Supabase sync failed");
-  }
-}
-
-function updateReadiness() {
-  const score = readiness(readForm());
-  readinessScore.textContent = score == null ? "--" : `${score}%`;
-}
-
-function switchTab(tabName) {
-  state.activeTab = tabName;
-  document.querySelectorAll(".tab-button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.tab === tabName);
+function showTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab-button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === name)
+  );
+  ['today', 'history', 'insights'].forEach(key => {
+    const panel = document.getElementById(key + 'Panel');
+    if (panel) panel.hidden = key !== name;
   });
-  document.querySelector("#todayPanel").hidden = tabName !== "today";
-  document.querySelector("#historyPanel").hidden = tabName !== "history";
-  document.querySelector("#insightsPanel").hidden = tabName !== "insights";
-  renderAll();
+  if (name === 'history')  renderHistory();
+  if (name === 'insights') renderInsights();
 }
 
-function renderStats() {
-  const entries = state.entries;
-  const workouts = entries.filter((entry) => entry.workoutType !== "Rest" && entry.duration > 0);
-  const avgSleep = entries.length ? entries.reduce((sum, entry) => sum + entry.sleepHours, 0) / entries.length : 0;
-  const avgEnergy = entries.length ? entries.reduce((sum, entry) => sum + entry.energy, 0) / entries.length : 0;
-  const avgMood = entries.length ? entries.reduce((sum, entry) => sum + entry.mood, 0) / entries.length : 0;
-  const totalMinutes = workouts.reduce((sum, entry) => sum + entry.duration, 0);
+// ── User switching ────────────────────────────
+function switchUser(user) {
+  currentUser = user;
+  localStorage.setItem('activeUser', user);
 
-  const stats = [
-    ["Entries", entries.length],
-    ["Workouts", workouts.length],
-    ["Avg sleep", `${rounded(avgSleep)} hr`],
-    ["Avg energy", `${rounded(avgEnergy)} / 5`],
-    ["Avg mood", `${rounded(avgMood)} / 5`],
-    ["Training time", `${totalMinutes} min`]
-  ];
+  // Update user button states
+  document.querySelectorAll('.user-button').forEach(b =>
+    b.classList.toggle('active', b.dataset.user === user)
+  );
 
-  statsGrid.innerHTML = stats
-    .map(([label, value]) => `
-      <article class="stat-card">
-        <span>${label}</span>
-        <strong>${value}</strong>
-      </article>
-    `)
-    .join("");
+  // Update header
+  const info = USERS[user];
+  document.getElementById('headerTitle').textContent = `${info.label}'s Training Log`;
+  document.title = `${info.label} Training Log`;
+
+  // Reload data for this user
+  loadTodayEntry();
+
+  // Re-render whichever tab is open
+  showTab(activeTab);
+}
+
+// ── History ───────────────────────────────────
+function calcStreak(sortedEntries) {
+  if (!sortedEntries.length) return 0;
+  const dates = sortedEntries.map(e => e.date).sort().reverse();
+  let streak = 0;
+  let cursor = new Date(today());
+  for (const d of dates) {
+    const dd   = new Date(d);
+    const diff = Math.round((cursor - dd) / 86400000);
+    if (diff <= 1) { streak++; cursor = dd; } else break;
+  }
+  return streak;
 }
 
 function renderHistory() {
-  const entries = sortedEntries();
-  if (!entries.length) {
-    historyList.innerHTML = '<p class="empty-state">No entries yet. Save today&apos;s check-in to start the log.</p>';
+  const entries = loadEntries();
+  const sorted  = Object.values(entries).sort((a, b) => b.date.localeCompare(a.date));
+
+  const totalWorkouts = sorted.filter(e => e.workoutType !== 'Rest').length;
+  const avgSleep  = sorted.length ? (sorted.reduce((s,e) => s + (e.sleepHours||0), 0) / sorted.length).toFixed(1) : '--';
+  const avgEnergy = sorted.length ? (sorted.reduce((s,e) => s + (e.energy||0),     0) / sorted.length).toFixed(1) : '--';
+  const streak    = calcStreak(sorted);
+
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><span>Entries</span><strong>${sorted.length}</strong></div>
+    <div class="stat-card"><span>Workouts</span><strong>${totalWorkouts}</strong></div>
+    <div class="stat-card"><span>Avg sleep</span><strong>${avgSleep}h</strong></div>
+    <div class="stat-card"><span>Avg energy</span><strong>${avgEnergy}/5</strong></div>
+    <div class="stat-card"><span>Streak</span><strong>${streak}d</strong></div>
+  `;
+
+  const historyList = document.getElementById('historyList');
+  if (!sorted.length) {
+    historyList.innerHTML = '<p class="empty-state">No entries yet. Log your first day!</p>';
     return;
   }
 
-  historyList.innerHTML = entries
-    .map((entry) => {
-      const score = readiness(entry);
-      const note = entry.workoutNotes || entry.dailyWin || "No notes added.";
-      return `
-        <article class="history-card">
-          <div>
-            <span class="history-meta">${formatDate(entry.date)} · ${score}% readiness</span>
-            <h3>${entry.workoutType} · ${entry.duration || 0} min · RPE ${entry.effort}</h3>
-            <p>Sleep ${rounded(entry.sleepHours)} hr · Energy ${entry.energy}/5 · Mood ${entry.mood}/5 · Soreness ${entry.soreness}/5</p>
-            <p>${note}</p>
-          </div>
-          <button type="button" data-edit-date="${entry.date}">Open</button>
-        </article>
-      `;
-    })
-    .join("");
-}
+  historyList.innerHTML = sorted.map(e => `
+    <div class="history-card" data-date="${e.date}">
+      <div class="history-date">
+        <strong>${formatDate(e.date)}</strong>
+        <span class="workout-badge">${e.workoutType || 'Rest'}</span>
+      </div>
+      <div class="history-metrics">
+        <span>😴 ${e.sleepHours||'--'}h</span>
+        <span>⚡ ${e.energy||'--'}/5</span>
+        <span>😊 ${e.mood||'--'}/5</span>
+        <span>💪 ${e.soreness||'--'}/5</span>
+        ${e.duration ? `<span>⏱ ${e.duration}m</span>` : ''}
+        ${e.effort   ? `<span>🔥 RPE ${e.effort}</span>` : ''}
+      </div>
+      ${e.notes ? `<p class="history-notes">${escapeHtml(e.notes)}</p>` : ''}
+    </div>
+  `).join('');
 
-function recentEntries(days = 14) {
-  return [...state.entries]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-days);
-}
-
-function drawChart() {
-  const ctx = trendChart.getContext("2d");
-  const width = trendChart.width;
-  const height = trendChart.height;
-  const entries = recentEntries();
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.strokeStyle = "#dfe5de";
-  ctx.lineWidth = 1;
-  for (let i = 1; i <= 4; i += 1) {
-    const y = 32 + ((height - 64) / 4) * i;
-    ctx.beginPath();
-    ctx.moveTo(44, y);
-    ctx.lineTo(width - 20, y);
-    ctx.stroke();
-  }
-
-  if (!entries.length) {
-    ctx.fillStyle = "#69756f";
-    ctx.font = "700 18px system-ui";
-    ctx.textAlign = "center";
-    ctx.fillText("Save entries to see trends", width / 2, height / 2);
-    return;
-  }
-
-  const series = [
-    ["Sleep", "#267a59", (entry) => Math.min(5, (entry.sleepHours || 0) / 2)],
-    ["Energy", "#2f6fa3", (entry) => entry.energy],
-    ["Mood", "#d99b2b", (entry) => entry.mood],
-    ["Effort", "#cf6254", (entry) => entry.effort / 2]
-  ];
-  const plotWidth = width - 74;
-  const plotHeight = height - 72;
-  const xFor = (index) => 44 + (entries.length === 1 ? plotWidth / 2 : (plotWidth / (entries.length - 1)) * index);
-  const yFor = (value) => 24 + plotHeight - ((Math.max(1, Math.min(5, value)) - 1) / 4) * plotHeight;
-
-  series.forEach(([label, color, accessor], seriesIndex) => {
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    entries.forEach((entry, index) => {
-      const x = xFor(index);
-      const y = yFor(accessor(entry));
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  historyList.querySelectorAll('.history-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const entry = loadEntries()[card.dataset.date];
+      if (entry) { populateForm(entry); showTab('today'); }
     });
-    ctx.stroke();
-
-    entries.forEach((entry, index) => {
-      ctx.beginPath();
-      ctx.arc(xFor(index), yFor(accessor(entry)), 4, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    ctx.font = "800 13px system-ui";
-    ctx.fillText(label, 52 + seriesIndex * 122, height - 16);
   });
-
-  ctx.fillStyle = "#69756f";
-  ctx.font = "700 12px system-ui";
-  ctx.textAlign = "center";
-  entries.forEach((entry, index) => {
-    const label = entry.date.slice(5).replace("-", "/");
-    ctx.fillText(label, xFor(index), height - 38);
-  });
-  ctx.textAlign = "left";
 }
 
+// ── Insights ──────────────────────────────────
 function renderInsights() {
-  const entries = sortedEntries();
+  const entries = loadEntries();
+  const sorted  = Object.values(entries).sort((a, b) => a.date.localeCompare(b.date));
+  drawChart(sorted.slice(-14));
+  renderInsightCards(sorted);
+}
+
+function drawChart(entries) {
+  const canvas = document.getElementById('trendChart');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
   if (!entries.length) {
-    insightList.innerHTML = '<p class="empty-state">Insights will appear after a few saved entries.</p>';
-    drawChart();
+    ctx.fillStyle = '#888';
+    ctx.font = '16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data yet — log some entries!', w / 2, h / 2);
     return;
   }
 
-  const avgSleep = entries.reduce((sum, entry) => sum + entry.sleepHours, 0) / entries.length;
-  const bestEnergy = [...entries].sort((a, b) => b.energy - a.energy)[0];
-  const hardDays = entries.filter((entry) => entry.effort >= 8);
-  const restDays = entries.filter((entry) => entry.workoutType === "Rest");
-  const lowSleepHardDays = hardDays.filter((entry) => entry.sleepHours < 7);
+  const padL = 40, padR = 20, padT = 20, padB = 40;
+  const cw = w - padL - padR, ch = h - padT - padB;
+  const n  = entries.length;
 
-  const cards = [
-    {
-      label: "Sleep pattern",
-      title: `${rounded(avgSleep)} hours average`,
-      body: avgSleep >= 8 ? "Sleep is supporting training well. Keep protecting bedtime." : "A little more sleep would probably help energy and recovery."
-    },
-    {
-      label: "Best energy",
-      title: bestEnergy ? `${formatDate(bestEnergy.date)} felt strongest` : "No energy data yet",
-      body: bestEnergy ? `Energy was ${bestEnergy.energy}/5 after ${rounded(bestEnergy.sleepHours)} hours of sleep.` : "Save a few entries to find high-energy patterns."
-    },
-    {
-      label: "Load check",
-      title: `${hardDays.length} hard day${hardDays.length === 1 ? "" : "s"} logged`,
-      body: lowSleepHardDays.length ? `${lowSleepHardDays.length} hard day${lowSleepHardDays.length === 1 ? "" : "s"} happened after less than 7 hours of sleep.` : "Hard days are not stacking on low sleep so far."
-    },
-    {
-      label: "Recovery",
-      title: `${restDays.length} rest day${restDays.length === 1 ? "" : "s"}`,
-      body: restDays.length ? "Rest days are in the log, which makes the training picture more honest." : "Add rest days too; they matter for the pattern."
+  ctx.strokeStyle = 'rgba(128,128,128,0.15)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 5; i++) {
+    const y = padT + ch - (i / 5) * ch;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + cw, y); ctx.stroke();
+    ctx.fillStyle = '#888'; ctx.font = '11px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText(i, padL - 6, y + 4);
+  }
+
+  ctx.fillStyle = '#888'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+  entries.forEach((e, i) => {
+    if (i % Math.ceil(n / 7) === 0 || i === n - 1) {
+      const x = padL + (n > 1 ? i * cw / (n - 1) : 0);
+      ctx.fillText(e.date.slice(5), x, h - padB + 16);
     }
+  });
+
+  const lines = [
+    { key: 'sleepQuality', label: 'Sleep',  color: '#6366f1' },
+    { key: 'energy',       label: 'Energy', color: '#f59e0b' },
+    { key: 'mood',         label: 'Mood',   color: '#10b981' },
+    { key: 'effort',       label: 'Effort', color: '#ef4444', scale: 0.5 },
   ];
 
-  insightList.innerHTML = cards
-    .map((card) => `
-      <article class="insight-card">
-        <span>${card.label}</span>
-        <strong>${card.title}</strong>
-        <p>${card.body}</p>
-      </article>
-    `)
-    .join("");
-  drawChart();
+  lines.forEach(({ key, color, scale = 1 }) => {
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+    entries.forEach((e, i) => {
+      const val = (e[key] || 0) * scale;
+      const x   = padL + (n > 1 ? i * cw / (n - 1) : 0);
+      const y   = padT + ch - (val / 5) * ch;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  lines.forEach(({ label, color }, i) => {
+    const lx = padL + i * 100;
+    ctx.fillStyle = color; ctx.fillRect(lx, padT + 4, 18, 3);
+    ctx.fillStyle = '#888'; ctx.textAlign = 'left';
+    ctx.fillText(label, lx + 22, padT + 9);
+  });
 }
 
-function renderAll() {
-  updateReadiness();
-  renderStats();
-  renderHistory();
-  renderInsights();
-}
-
-entryForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  updateSleepSummary();
-  const entry = readForm();
-  if (!entry.date) return;
-  await saveEntry(entry);
-  showToast(state.syncReady ? "Entry saved to Supabase" : "Entry saved locally");
-  renderAll();
-});
-
-deleteEntryButton.addEventListener("click", async () => {
-  const date = fields.date.value;
-  const existing = entryByDate(date);
-  if (!existing) {
-    showToast("No saved entry for this date");
+function renderInsightCards(entries) {
+  const insightList = document.getElementById('insightList');
+  if (entries.length < 3) {
+    insightList.innerHTML = '<p class="empty-state">Log at least 3 days for insights.</p>';
     return;
   }
-  await deleteEntry(date);
-  writeForm(blankEntry(date));
-  showToast(state.syncReady ? "Entry deleted from Supabase" : "Entry deleted locally");
-  renderAll();
-});
+  const recent7 = entries.slice(-7), prev7 = entries.slice(-14, -7);
+  const avg = (arr, key) => arr.length ? arr.reduce((s,e) => s + (e[key]||0), 0) / arr.length : 0;
+  const insights = [];
 
-newEntryButton.addEventListener("click", () => {
-  writeForm(blankEntry(todayString()));
-  showToast("Ready for a new entry");
-});
+  const energyDelta = avg(recent7,'energy')     - avg(prev7,'energy');
+  const sleepDelta  = avg(recent7,'sleepHours') - avg(prev7,'sleepHours');
+  const moodDelta   = avg(recent7,'mood')        - avg(prev7,'mood');
 
-usualSleepButton.addEventListener("click", () => {
-  fields.bedtime.value = "22:30";
-  fields.wakeTime.value = "06:30";
-  updateSleepSummary();
-  updateReadiness();
-  showToast("Usual sleep filled in");
-});
+  if (Math.abs(energyDelta) >= 0.4) insights.push({ icon:'⚡', text:`Energy is ${energyDelta>0?'up':'down'} ${Math.abs(energyDelta).toFixed(1)} pts vs. last week.` });
+  if (Math.abs(sleepDelta)  >= 0.3) insights.push({ icon:'😴', text:`Averaging ${Math.abs(sleepDelta).toFixed(1)}h ${sleepDelta>0?'more':'less'} sleep than last week.` });
+  if (Math.abs(moodDelta)   >= 0.4) insights.push({ icon:'😊', text:`Mood is ${moodDelta>0?'improving':'dipping'} this week.` });
 
-fields.date.addEventListener("change", () => {
-  writeForm(entryByDate(fields.date.value) || blankEntry(fields.date.value));
-});
+  const highSoreness = recent7.filter(e => (e.soreness||0) >= 4).length;
+  if (highSoreness >= 3) insights.push({ icon:'💪', text:`${highSoreness} high-soreness days — consider extra recovery.` });
 
-[fields.bedtime, fields.wakeTime].forEach((field) => {
-  field.addEventListener("input", () => {
-    updateSleepSummary();
-    updateRangeLabels();
-    updateReadiness();
-  });
-});
+  const workouts = recent7.filter(e => e.workoutType !== 'Rest').length;
+  if (workouts >= 6)                      insights.push({ icon:'🔥', text:`${workouts} workout days this week — great consistency!` });
+  else if (workouts <= 2 && entries.length > 7) insights.push({ icon:'📅', text:`Only ${workouts} workouts this week — easy week?` });
 
-document.querySelector(".effort-row").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-value]");
-  if (!button) return;
-  fields.effort.value = button.dataset.value;
-  updateRangeLabels();
-});
+  if (!insights.length) insights.push({ icon:'✅', text:'All metrics look steady. Keep showing up!' });
 
-document.querySelectorAll("[data-rating]").forEach((group) => {
-  group.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-value]");
-    if (!button) return;
-    const name = group.dataset.rating;
-    fields[name].value = button.dataset.value;
-    updateRangeLabels();
-    updateReadiness();
-  });
-});
-
-historyList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-edit-date]");
-  if (!button) return;
-  const entry = entryByDate(button.dataset.editDate);
-  if (!entry) return;
-  writeForm(entry);
-  switchTab("today");
-});
-
-document.querySelectorAll(".tab-button").forEach((button) => {
-  button.addEventListener("click", () => switchTab(button.dataset.tab));
-});
-
-async function init() {
-  writeForm(entryByDate(todayString()) || blankEntry(todayString()));
-  renderAll();
-  await syncFromSupabase();
-  writeForm(entryByDate(fields.date.value) || blankEntry(fields.date.value));
-  renderAll();
+  insightList.innerHTML = insights.map(i =>
+    `<div class="insight-card"><span class="insight-icon">${i.icon}</span><p>${i.text}</p></div>`
+  ).join('');
 }
 
-init();
+// ── Boot — wire everything up once DOM is ready ──
+function init() {
+  // User switcher buttons
+  document.querySelectorAll('.user-button').forEach(btn =>
+    btn.addEventListener('click', () => switchUser(btn.dataset.user))
+  );
+
+  // Tab buttons
+  document.querySelectorAll('.tab-button').forEach(btn =>
+    btn.addEventListener('click', () => showTab(btn.dataset.tab))
+  );
+
+  // Star rating buttons
+  document.querySelectorAll('.star-row').forEach(row => {
+    row.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = row.closest('[data-rating]').dataset.rating;
+        setRating(name, +btn.dataset.value);
+        updateReadiness();
+      });
+    });
+  });
+
+  // RPE buttons
+  document.querySelectorAll('.effort-row button').forEach(btn =>
+    btn.addEventListener('click', () => { setEffort(+btn.dataset.value); updateReadiness(); })
+  );
+
+  // Sleep inputs
+  document.getElementById('bedtime').addEventListener('change', updateSleepDisplay);
+  document.getElementById('wakeTime').addEventListener('change', updateSleepDisplay);
+
+  // Same-as-usual sleep
+  document.getElementById('usualSleepButton').addEventListener('click', () => {
+    const usual = JSON.parse(localStorage.getItem(storageKey('usualSleep')) || 'null');
+    if (!usual) { showToast('No usual sleep saved yet.'); return; }
+    document.getElementById('bedtime').value  = usual.bedtime;
+    document.getElementById('wakeTime').value = usual.wakeTime;
+    updateSleepDisplay();
+  });
+
+  // Save entry
+  document.getElementById('entryForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const entry   = readFormValues();
+    const entries = loadEntries();
+    entries[entry.date] = entry;
+    saveEntries(entries);
+    if (entry.bedtime && entry.wakeTime) {
+      localStorage.setItem(storageKey('usualSleep'), JSON.stringify({ bedtime: entry.bedtime, wakeTime: entry.wakeTime }));
+    }
+    showToast('Entry saved ✓');
+  });
+
+  // New day
+  document.getElementById('newEntryButton').addEventListener('click', () => {
+    resetForm();
+    showToast('Ready for a new day.');
+  });
+
+  // Delete entry
+  document.getElementById('deleteEntryButton').addEventListener('click', () => {
+    const d = document.getElementById('entryDate').value;
+    if (!d) return;
+    const entries = loadEntries();
+    if (!entries[d]) { showToast('Nothing to delete.'); return; }
+    delete entries[d];
+    saveEntries(entries);
+    resetForm();
+    showToast('Entry deleted.');
+  });
+
+  // Set initial user (triggers header, loads data, renders tab)
+  switchUser(currentUser);
+}
+
+document.addEventListener('DOMContentLoaded', init);
