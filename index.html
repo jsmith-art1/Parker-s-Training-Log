@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Parker Training Log</title>
+    <link rel="stylesheet" href="styles.css?v=3">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Team Smith HQ</p>
+          <h1>Parker Training Log</h1>
+        </div>
+        <div class="score-card" aria-live="polite">
+          <span>Readiness</span>
+          <strong id="readinessScore">--</strong>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Tracker views">
+        <button class="tab-button active" type="button" data-tab="today">Today</button>
+        <button class="tab-button" type="button" data-tab="history">History</button>
+        <button class="tab-button" type="button" data-tab="insights">Insights</button>
+      </nav>
+
+      <section class="tab-panel" id="todayPanel">
+        <form class="entry-form" id="entryForm">
+          <section class="form-section">
+            <div class="section-heading">
+              <span class="section-icon">☀️</span>
+              <div>
+                <h2>Check-in</h2>
+                <p>Sleep, energy, mood, and soreness.</p>
+              </div>
+            </div>
+
+            <label class="field wide">
+              <span>Date</span>
+              <input id="entryDate" name="date" type="date" required>
+            </label>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Bedtime</span>
+                <input id="bedtime" name="bedtime" type="time">
+              </label>
+              <label class="field">
+                <span>Wake-up</span>
+                <input id="wakeTime" name="wakeTime" type="time">
+              </label>
+            </div>
+
+            <input id="sleepHours" name="sleepHours" type="hidden" value="8">
+            <div class="sleep-summary">
+              <strong id="sleepSummary">8h sleep</strong>
+              <span id="sleepHint">Right in the teen target zone.</span>
+              <button id="usualSleepButton" type="button">Same as usual</button>
+            </div>
+
+            <div class="scale-grid">
+              <div class="rating-field" data-rating="sleepQuality">
+                <span>Sleep quality <strong id="sleepQualityValue">3</strong></span>
+                <input id="sleepQuality" name="sleepQuality" type="hidden" value="3">
+                <div class="star-row" role="radiogroup" aria-label="Sleep quality rating">
+                  <button type="button" role="radio" data-value="1" aria-label="Sleep quality 1 out of 5">★</button>
+                  <button type="button" role="radio" data-value="2" aria-label="Sleep quality 2 out of 5">★</button>
+                  <button type="button" role="radio" data-value="3" aria-label="Sleep quality 3 out of 5">★</button>
+                  <button type="button" role="radio" data-value="4" aria-label="Sleep quality 4 out of 5">★</button>
+                  <button type="button" role="radio" data-value="5" aria-label="Sleep quality 5 out of 5">★</button>
+                </div>
+              </div>
+              <div class="rating-field" data-rating="energy">
+                <span>Energy <strong id="energyValue">3</strong></span>
+                <input id="energy" name="energy" type="hidden" value="3">
+                <div class="star-row" role="radiogroup" aria-label="Energy rating">
+                  <button type="button" role="radio" data-value="1" aria-label="Energy 1 out of 5">★</button>
+                  <button type="button" role="radio" data-value="2" aria-label="Energy 2 out of 5">★</button>
+                  <button type="button" role="radio" data-value="3" aria-label="Energy 3 out of 5">★</button>
+                  <button type="button" role="radio" data-value="4" aria-label="Energy 4 out of 5">★</button>
+                  <button type="button" role="radio" data-value="5" aria-label="Energy 5 out of 5">★</button>
+                </div>
+              </div>
+              <div class="rating-field" data-rating="mood">
+                <span>Mood <strong id="moodValue">3</strong></span>
+                <input id="mood" name="mood" type="hidden" value="3">
+                <div class="star-row" role="radiogroup" aria-label="Mood rating">
+                  <button type="button" role="radio" data-value="1" aria-label="Mood 1 out of 5">★</button>
+                  <button type="button" role="radio" data-value="2" aria-label="Mood 2 out of 5">★</button>
+                  <button type="button" role="radio" data-value="3" aria-label="Mood 3 out of 5">★</button>
+                  <button type="button" role="radio" data-value="4" aria-label="Mood 4 out of 5">★</button>
+                  <button type="button" role="radio" data-value="5" aria-label="Mood 5 out of 5">★</button>
+                </div>
+              </div>
+              <div class="rating-field" data-rating="soreness">
+                <span>Soreness <strong id="sorenessValue">2</strong></span>
+                <input id="soreness" name="soreness" type="hidden" value="2">
+                <div class="star-row" role="radiogroup" aria-label="Soreness rating">
+                  <button type="button" role="radio" data-value="1" aria-label="Soreness 1 out of 5">★</button>
+                  <button type="button" role="radio" data-value="2" aria-label="Soreness 2 out of 5">★</button>
+                  <button type="button" role="radio" data-value="3" aria-label="Soreness 3 out of 5">★</button>
+                  <button type="button" role="radio" data-value="4" aria-label="Soreness 4 out of 5">★</button>
+                  <button type="button" role="radio" data-value="5" aria-label="Soreness 5 out of 5">★</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <div class="section-heading">
+              <span class="section-icon">🏃‍♀️</span>
+              <div>
+                <h2>Workout</h2>
+                <p>What happened today?</p>
+              </div>
+            </div>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Type</span>
+                <select id="workoutType" name="workoutType">
+                  <option>Rest</option>
+                  <option>Strength</option>
+                  <option>Conditioning</option>
+                  <option>Bike</option>
+                  <option>Run</option>
+                  <option>Practice</option>
+                  <option>Game</option>
+                  <option>Mobility</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Minutes</span>
+                <input id="duration" name="duration" type="number" min="0" max="240" step="5" inputmode="numeric" placeholder="45">
+              </label>
+            </div>
+
+            <div class="effort-field">
+              <span>Effort / RPE <strong id="effortValue">4</strong></span>
+              <input id="effort" name="effort" type="hidden" value="4">
+              <div class="effort-row" role="radiogroup" aria-label="Effort RPE">
+                <button type="button" role="radio" data-value="1" aria-label="RPE 1">1</button>
+                <button type="button" role="radio" data-value="2" aria-label="RPE 2">2</button>
+                <button type="button" role="radio" data-value="3" aria-label="RPE 3">3</button>
+                <button type="button" role="radio" data-value="4" aria-label="RPE 4">4</button>
+                <button type="button" role="radio" data-value="5" aria-label="RPE 5">5</button>
+                <button type="button" role="radio" data-value="6" aria-label="RPE 6">6</button>
+                <button type="button" role="radio" data-value="7" aria-label="RPE 7">7</button>
+                <button type="button" role="radio" data-value="8" aria-label="RPE 8">8</button>
+                <button type="button" role="radio" data-value="9" aria-label="RPE 9">9</button>
+                <button type="button" role="radio" data-value="10" aria-label="RPE 10">10</button>
+              </div>
+            </div>
+
+            <label class="field wide">
+              <span>Notes</span>
+              <textarea id="workoutNotes" name="workoutNotes" rows="3" placeholder="What did she do? Anything worth remembering?"></textarea>
+            </label>
+            <input id="dailyWin" name="dailyWin" type="hidden">
+          </section>
+
+          <div class="form-actions">
+            <button class="primary-button" type="submit">Save entry</button>
+            <button class="secondary-button" id="newEntryButton" type="button">New day</button>
+            <button class="danger-button" id="deleteEntryButton" type="button">Delete</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="tab-panel" id="historyPanel" hidden>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+
+      <section class="tab-panel" id="insightsPanel" hidden>
+        <div class="chart-card">
+          <div class="section-heading">
+            <span class="section-icon">📈</span>
+            <div>
+              <h2>Last 14 days</h2>
+              <p>Sleep, energy, mood, and effort.</p>
+            </div>
+          </div>
+          <canvas id="trendChart" width="720" height="320" aria-label="Last 14 days trend chart"></canvas>
+        </div>
+        <div class="insight-list" id="insightList"></div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="app.js?v=3"></script>
+  </body>
+</html>
